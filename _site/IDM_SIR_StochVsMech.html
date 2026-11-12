@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stochastic SIR runs vs the mechanistic model</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#8a8984; --grid:#e6e5e1; --line:#d4d3cd;
+  --S:#2a78d6; --I:#eb6834; --R:#1baf7a; --D:#8a8984;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --bg:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#8d8c85; --grid:#2f2e2b; --line:#44433f;
+    --S:#3987e5; --I:#d95926; --R:#199e70; --D:#9a9992;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:1240px;margin:0 auto;padding:20px 18px 32px}
+h1{font-size:20px;margin:0 0 4px;font-weight:650}
+.sub{color:var(--ink2);margin:0 0 12px;max-width:80ch}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;align-items:center;color:var(--ink2);font-size:12.5px;margin-bottom:6px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:10px;height:10px;border-radius:50%;display:inline-block}
+.ln{width:22px;height:0;display:inline-block;border-top:1.5px solid var(--ink2)}
+.ln.thick{border-top-width:3.5px;border-color:var(--ink)}
+.ln.dash{border-top:2px dashed var(--ink2)}
+#wrap{overflow-x:auto}
+canvas{display:block}
+#bar{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin:10px 0 4px}
+button,select{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer}
+button:hover,select:hover{border-color:var(--ink2)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--S);outline-offset:2px}
+#bar2{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;margin:8px 0 2px}
+input[type=number]{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+#scrub{flex:1;min-width:180px;accent-color:var(--ink2)}
+label{color:var(--ink2);font-size:12.5px;display:inline-flex;gap:6px;align-items:center}
+#status{color:var(--ink2);font-variant-numeric:tabular-nums;min-width:20ch;font-size:13px}
+#res{border-collapse:collapse;margin-top:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .6s;font-size:13px}
+#res.on{opacity:1}
+#res th,#res td{padding:5px 16px 5px 0;text-align:right;border-bottom:1px solid var(--grid)}
+#res th:first-child,#res td:first-child{text-align:left}
+#res th{font-weight:600;color:var(--ink2);font-size:12px}
+.note{color:var(--muted);font-size:12px;max-width:100ch;margin-top:12px}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>Median of many stochastic epidemics ≈ the mechanistic model</h1>
+  <p class="sub">Each stochastic SIR run is a different epidemic. Its peak, duration and final size drop into a histogram. When all runs are in, the deterministic model draws its answer on top.</p>
+  <div class="legend" aria-label="Legend">
+    <span><i class="sw" style="background:var(--S)"></i>Susceptible</span>
+    <span><i class="sw" style="background:var(--I)"></i>Infectious</span>
+    <span><i class="sw" style="background:var(--R)"></i>Recovered</span>
+    <span><i class="ln"></i>one stochastic run</span>
+    <span><i class="ln thick"></i>mechanistic model</span>
+    <span><i class="ln dash"></i>median of stochastic runs</span>
+  </div>
+  <div id="wrap"><canvas id="cv" role="img" aria-label="Animation: stochastic SIR runs build histograms of peak infected, duration and total cases; the mechanistic model is overlaid as a reference line."></canvas></div>
+  <div id="bar">
+    <button id="play" aria-label="Play or pause">Pause</button>
+    <button id="replay">Replay</button>
+    <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Timeline">
+    <span id="status"></span>
+    <label>Runs <select id="nsel"><option>50</option><option>100</option><option selected>200</option><option>500</option></select></label>
+    <label>Speed <select id="spd"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+    <button id="seed">New random seed</button>
+  </div>
+  <div id="bar2">
+    <label>Population <select id="pop"><option>200</option><option>500</option><option selected>1000</option><option>2000</option><option>5000</option></select></label>
+    <label>Initially infected <input id="i0" type="number" min="1" max="100" value="5" style="width:64px"></label>
+    <label>R₀ <input id="r0" type="range" min="1.2" max="5" step="0.1" value="2.5" style="width:150px;accent-color:var(--ink2)"> <b id="r0v" style="color:var(--ink);min-width:2.6ch;font-variant-numeric:tabular-nums">2.5</b></label>
+  </div>
+  <table id="res" aria-label="Summary of medians versus mechanistic model">
+    <thead><tr><th></th><th>Stochastic median</th><th>Middle 90% of runs</th><th>Mechanistic</th><th>Difference</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="note" id="note"></p>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d');
+const P={N:1000,I0:5,beta:0.5,gamma:0.2};
+const GRID=240, NBS={peak:25,dur:25,total:50}, DROP=0.5;
+let C={};
+function readColors(){const s=getComputedStyle(document.documentElement);for(const k of['bg','ink','ink2','muted','grid','line','S','I','R','D'])C[k]=s.getPropertyValue('--'+k).trim()}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const q=(arr,p)=>{const a=[...arr].sort((x,y)=>x-y);const h=(a.length-1)*p,l=Math.floor(h);return a[l]+(a[Math.min(l+1,a.length-1)]-a[l])*(h-l)};
+function niceStep(max,target){for(let k=0;k<7;k++)for(const m of[1,2,5]){const s=m*10**k;if(max/s<=target)return s}return 1e7}
+function niceCeil(x){const st=niceStep(x,20);return Math.ceil(x/st)*st}
+
+/* ---------- models ---------- */
+function gillespie(rng){
+  const N=P.N;let S=N-P.I0,I=P.I0,t=0;const T=[0],Ss=[S],Is=[I];
+  while(I>0){
+    const a=P.beta*S*I/N,b=P.gamma*I,tot=a+b;
+    t+=-Math.log(1-rng())/tot;
+    if(rng()<a/tot){S--;I++}else I--;
+    T.push(t);Ss.push(S);Is.push(I);
+  }
+  return{t:T,s:Ss,i:Is};
+}
+function solveODE(tMax){
+  const N=P.N,h=tMax/GRID/20;let S=N-P.I0,I=P.I0,t=0;
+  const f=(S,I)=>{const inf=P.beta*S*I/N;return[-inf,inf-P.gamma*I]};
+  const Sa=new Float32Array(GRID+1),Ia=new Float32Array(GRID+1);
+  let peak=I,tPeak=0,dur=null;
+  for(let k=0;k<=GRID;k++){
+    Sa[k]=S;Ia[k]=I;
+    if(k===GRID)break;
+    for(let j=0;j<20;j++){
+      const k1=f(S,I),k2=f(S+h/2*k1[0],I+h/2*k1[1]),k3=f(S+h/2*k2[0],I+h/2*k2[1]),k4=f(S+h*k3[0],I+h*k3[1]);
+      S+=h/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);I+=h/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);t+=h;
+      if(I>peak){peak=I;tPeak=t}
+      if(dur===null&&t>5&&I<1)dur=t;
+    }
+  }
+  const Ra=Sa.map((s,k)=>N-s-Ia[k]);
+  return{S:Sa,I:Ia,R:Ra,peak,tPeak,dur:dur===null?tMax:dur,total:N-S};
+}
+function sample(run,tMax){
+  const S=new Float32Array(GRID+1),I=new Float32Array(GRID+1),R=new Float32Array(GRID+1);let j=0;
+  for(let k=0;k<=GRID;k++){const t=k*tMax/GRID;while(j+1<run.t.length&&run.t[j+1]<=t)j++;S[k]=run.s[j];I[k]=run.i[j];R[k]=P.N-run.s[j]-run.i[j]}
+  return{S,I,R};
+}
+
+/* ---------- build everything for a given n / seed ---------- */
+let M=null, seed=42;
+function build(n){
+  // pass 1: metrics only (finds the time axis); pass 2: same seed, sample curves
+  const metrics=[];let rng=mulberry(seed);
+  for(let i=0;i<n;i++){
+    const r=gillespie(rng);let peak=0,tPeak=0;
+    for(let j=0;j<r.i.length;j++)if(r.i[j]>peak){peak=r.i[j];tPeak=r.t[j]}
+    metrics.push({peak,tPeak,dur:r.t[r.t.length-1],total:P.N-r.s[r.s.length-1]});
+  }
+  const odeDur=solveODE(800).dur;
+  const tMax=Math.max(30,Math.ceil(Math.max(...metrics.map(r=>r.dur),odeDur*1.1)/10)*10);
+  const ode=solveODE(tMax);
+  rng=mulberry(seed);
+  const runs=metrics.map(m=>{const g=sample(gillespie(rng),tMax);return{...m,...g,ke:Math.min(GRID,Math.ceil(m.dur/tMax*GRID))}});
+  const maxV={
+    peak:niceCeil(Math.max(...runs.map(r=>r.peak),ode.peak)*1.06),
+    dur:niceCeil(Math.max(...runs.map(r=>r.dur),ode.dur)*1.04),
+    total:P.N};
+  const keys=['peak','dur','total'];
+  const bin={},idx={},maxCount={};
+  for(const k of keys){
+    const NB=NBS[k],cnt=new Array(NB).fill(0);bin[k]=[];idx[k]=[];
+    for(const r of runs){const b=Math.min(NB-1,Math.floor(r[k]/maxV[k]*NB));bin[k].push(b);idx[k].push(cnt[b]++)}
+    maxCount[k]=Math.max(...cnt);
+  }
+  // timeline
+  const d=[],t0=[];let t=0.3;
+  for(let i=0;i<n;i++){const di=0.07+1.4*Math.exp(-i/6);d.push(di);t0.push(t);t+=di}
+  const land=runs.map((_,i)=>t0[i]+0.8*d[i]+DROP);
+  const Ts=Math.max(...land)+0.3;
+  const tl={Ts,odeDraw:[Ts,2.2],hi:[Ts+2.2,.5],drop:[Ts+2.7,.7],grow:[Ts+3.4,.5],med:[Ts+3.9,.6],end:Ts+5.2};
+  const med={peak:q(runs.map(r=>r.peak),.5),dur:q(runs.map(r=>r.dur),.5),total:q(runs.map(r=>r.total),.5)};
+  M={n,runs,tMax,ode,maxV,bin,idx,maxCount,d,t0,land,tl,med};
+  ghostK=0;
+  fillTable();
+  $('scrub').max=Math.round(tl.end*100);
+}
+function fillTable(){
+  const rows=[['Peak infected','peak',0,' people'],['Duration','dur',1,' days'],['Total cases','total',0,' people']];
+  $('res').querySelector('tbody').innerHTML=rows.map(([name,k,dp,u])=>{
+    const v=M.runs.map(r=>r[k]),m=M.med[k],o=M.ode[k];
+    const f=x=>x.toFixed(dp);
+    return `<tr><td>${name}</td><td>${f(m)}</td><td>${f(q(v,.05))} – ${f(q(v,.95))}</td><td>${f(o)}</td><td>${((m-o)/o*100).toFixed(1)}%</td></tr>`;
+  }).join('');
+  $('note').textContent=`${M.n} stochastic runs (Gillespie, population ${P.N}, ${P.I0} initial infectious, β = ${P.beta}, γ = ${P.gamma}, R₀ = ${(P.beta/P.gamma).toFixed(1)}) against the deterministic SIR ODE. Duration = time until nobody is infectious (ODE: fewer than one person). Blocks at the far left of the histograms are runs that fizzled out early by chance.`;
+}
+
+/* ---------- layout ---------- */
+let dpr=1,cssW=900,cssH=600,G={};
+const gcv=[0,1].map(()=>document.createElement('canvas')),gctx=gcv.map(c=>c.getContext('2d'));let ghostK=0;
+function layout(){
+  dpr=window.devicePixelRatio||1;
+  cssW=Math.max(780,$('wrap').clientWidth);cssH=Math.round(Math.max(560,cssW*0.56));
+  cv.style.width=cssW+'px';cv.style.height=cssH+'px';cv.width=Math.round(cssW*dpr);cv.height=Math.round(cssH*dpr);
+  const mx=6,gap=30,colW=(cssW-2*mx-2*gap)/3;
+  G.cols=[0,1,2].map(i=>({x:mx+i*(colW+gap),w:colW}));
+  G.padL=38;G.padR=6;G.pw=colW-G.padL-G.padR;
+  G.top={y:50,h:Math.round(cssH*0.31)};
+  G.hist={y:G.top.y+G.top.h+84};G.hist.h=cssH-G.hist.y-46;
+  for(const c of gcv){c.width=Math.round(G.pw*dpr);c.height=Math.round(G.top.h*dpr)}ghostK=0;
+}
+
+/* ---------- drawing helpers ---------- */
+const METRICS=[
+  {key:'peak',title:'Peak infected',sub:'most people infectious at once',unit:'people',col:'I'},
+  {key:'dur',title:'Epidemic duration',sub:'time until nobody is infectious',unit:'days',col:'D'},
+  {key:'total',title:'Total cases',sub:'everyone ever infected (final R)',unit:'people',col:'R'}];
+const tx=(c,t)=>G.cols[c].x+G.padL+t/M.tMax*G.pw;
+const ty=v=>G.top.y+G.top.h-v/P.N*G.top.h;
+const hx=(c,v,m)=>G.cols[c].x+G.padL+v/M.maxV[METRICS[m].key]*G.pw;
+const easeOut=u=>1-(1-u)*(1-u), easeIn=u=>u*u;
+function font(px,w=400){ctx.font=`${w} ${px}px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`}
+function text(s,x,y,col,px=11,w=400,align='left'){font(px,w);ctx.fillStyle=col;ctx.textAlign=align;ctx.textBaseline='alphabetic';ctx.fillText(s,x,y)}
+function rrect(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function curve(c,arr,upto,col,lw,alpha=1,g=ctx,ox=null){
+  g.beginPath();
+  for(let k=0;k<=upto;k++){const x=ox===null?tx(c,k*M.tMax/GRID):k/GRID*G.pw,y=ox===null?ty(arr[k]):G.top.h-arr[k]/P.N*G.top.h;k?g.lineTo(x,y):g.moveTo(x,y)}
+  g.strokeStyle=col;g.lineWidth=lw;g.globalAlpha=alpha;g.lineJoin='round';g.stroke();g.globalAlpha=1;
+}
+function hpos(m,rec){ // highlight marker position for metric m (in top chart coords)
+  if(m===0)return[tx(0,rec.tPeak),ty(rec.peak)];
+  if(m===1)return[tx(1,rec.dur),ty(P.N*0.045)];
+  return[tx(2,rec.dur),ty(rec.total)];
+}
+function hlGuides(m,rec,col,showMarker,label){
+  ctx.save();ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
+  const [x,y]=hpos(m,rec),x0=tx(m,0);
+  if(m===0){ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x,y);ctx.stroke()}
+  if(m===1){ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x,y);ctx.moveTo(x0,y-5);ctx.lineTo(x0,y+5);ctx.moveTo(x,y-5);ctx.lineTo(x,y+5);ctx.stroke()}
+  if(m===2){ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x,y);ctx.stroke()}
+  ctx.restore();
+  if(showMarker)marker(x,y,col,5);
+  if(label!=null){const v=m===1?label.toFixed(1):Math.round(label);text(String(v),x+8,y-8,C.ink,11,600)}
+}
+function marker(x,y,col,r){ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle=col;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=C.bg;ctx.stroke()}
+function geomHist(m){
+  const c=G.cols[m],k=METRICS[m].key,ymax=Math.max(5,Math.ceil(M.maxCount[k]/5)*5);
+  return{x0:c.x+G.padL,w:G.pw,y0:G.hist.y,h:G.hist.h,base:G.hist.y+G.hist.h,ymax,bw:G.pw/NBS[k],unit:G.hist.h/ymax};
+}
+function blockRect(m,i){
+  const g=geomHist(m),k=METRICS[m].key;
+  return{x:g.x0+M.bin[k][i]*g.bw+0.5,y:g.base-(M.idx[k][i]+1)*g.unit,w:g.bw-1,h:g.unit};
+}
+function colorOf(m){return C[METRICS[m].col]}
+
+/* ---------- axes ---------- */
+function drawAxes(){
+  for(let m=0;m<3;m++){
+    const c=G.cols[m],x0=c.x+G.padL;
+    text(METRICS[m].title,c.x,18,C.ink,14,650);
+    text(METRICS[m].sub,c.x,34,C.muted,11.5);
+    // top chart
+    ctx.lineWidth=1;
+    for(const v of[0,P.N/2,P.N]){ctx.strokeStyle=v===0?C.line:C.grid;ctx.beginPath();ctx.moveTo(x0,Math.round(ty(v))+.5);ctx.lineTo(x0+G.pw,Math.round(ty(v))+.5);ctx.stroke();text(String(v),x0-6,ty(v)+4,C.muted,11,400,'right')}
+    const st=niceStep(M.tMax,6);
+    for(let t=0;t<=M.tMax;t+=st)text(String(t),tx(m,t),G.top.y+G.top.h+15,C.muted,11,400,'center');
+    text('days',x0+G.pw,G.top.y+G.top.h+29,C.muted,11,400,'right');
+    // histogram
+    const g=geomHist(m),k=METRICS[m].key;
+    for(const v of[0,g.ymax/2,g.ymax]){const y=Math.round(g.base-v/g.ymax*g.h)+.5;ctx.strokeStyle=v===0?C.line:C.grid;ctx.beginPath();ctx.moveTo(g.x0,y);ctx.lineTo(g.x0+g.w,y);ctx.stroke();text(String(Math.round(v)),g.x0-6,y+4,C.muted,11,400,'right')}
+    if(m===0)text('runs',g.x0-6,g.y0-8,C.muted,11,400,'right');
+    const hs=niceStep(M.maxV[k],5);
+    for(let v=0;v<=M.maxV[k];v+=hs)text(String(v),g.x0+v/M.maxV[k]*g.w,g.base+16,C.muted,11,400,'center');
+    text(METRICS[m].unit,g.x0+g.w,g.base+31,C.muted,11,400,'right');
+  }
+}
+
+/* ---------- main render ---------- */
+function findK(T){let lo=-1,hi=M.n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(M.t0[mid]<=T)lo=mid;else hi=mid-1}return lo}
+function render(T){
+  const{tl}=M;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cssW,cssH);
+  drawAxes();
+  const afterStoch=T>=tl.Ts;
+  let k=findK(T);const kc=afterStoch?M.n:k;       // number of runs that are ghosts
+  // ghost layer (infectious curves of finished runs)
+  if(kc<ghostK){for(const g of gctx){g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,gcv[0].width,gcv[0].height)}ghostK=0}
+  for(const g of gctx)g.setTransform(dpr,0,0,dpr,0,0);
+  for(;ghostK<kc;ghostK++){const r=M.runs[ghostK];curve(0,r.I,r.ke,C.I,1,0.075,gctx[0],0);curve(0,r.R,r.ke,C.R,1,0.075,gctx[1],0)}
+  // stochastic traces fade further once the mechanistic model arrives
+  const gfade=lerp(1,0.3,clamp((T-tl.Ts)/1.2));
+  ctx.globalAlpha=gfade;
+  for(let m=0;m<3;m++)ctx.drawImage(gcv[m===2?1:0],G.cols[m].x+G.padL,G.top.y,G.pw,G.top.h);
+  ctx.globalAlpha=1;
+
+  // current run
+  if(!afterStoch&&k>=0){
+    const r=M.runs[k],d=M.d[k],t0=M.t0[k];
+    const s=clamp((T-t0)/(0.6*d)),upto=Math.round(s*r.ke);
+    for(let m=0;m<3;m++){
+      curve(m,r.S,upto,C.S,1.8);curve(m,r.R,upto,C.R,1.8);curve(m,r.I,upto,C.I,2);
+      if(s>=1){
+        const dropped=T>=t0+0.8*d;
+        hlGuides(m,r,colorOf(m),!dropped,d>0.3?r[METRICS[m].key]:null);
+      }
+    }
+  }
+  // histogram blocks
+  for(let m=0;m<3;m++){
+    ctx.fillStyle=colorOf(m);ctx.strokeStyle=C.bg;ctx.lineWidth=0.6;
+    for(let i=0;i<M.n;i++){
+      if(M.land[i]>T)continue;
+      const b=blockRect(m,i);ctx.fillRect(b.x,b.y,b.w,b.h);if(b.h>2.5)ctx.strokeRect(b.x,b.y,b.w,b.h);
+    }
+  }
+  // markers in flight
+  for(let i=Math.max(0,k);i>=0;i--){
+    const ds=M.t0[i]+0.8*M.d[i];
+    if(ds+DROP<T){ if(i<k-12)break; continue}
+    if(ds>T)continue;
+    const u=clamp((T-ds)/DROP);
+    for(let m=0;m<3;m++){
+      const r=M.runs[i],[sx,sy]=hpos(m,r),b=blockRect(m,i);
+      const x=lerp(sx,b.x+b.w/2,easeOut(u)),y=lerp(sy,b.y+b.h/2,easeIn(u));
+      const w=lerp(10,b.w,u),h=lerp(10,Math.max(b.h,1),u);
+      ctx.fillStyle=colorOf(m);rrect(x-w/2,y-h/2,w,h,lerp(5,0.5,u));ctx.fill();
+    }
+  }
+  // mechanistic phase
+  if(T>=tl.Ts){
+    const o=M.ode;
+    const pd=clamp((T-tl.odeDraw[0])/tl.odeDraw[1]),upto=Math.round(pd*GRID);
+    for(let m=0;m<3;m++){curve(m,o.S,upto,C.S,3.4);curve(m,o.R,upto,C.R,3.4);curve(m,o.I,upto,C.I,3.4)}
+    const ph=clamp((T-tl.hi[0])/tl.hi[1]);
+    if(ph>0){
+      ctx.globalAlpha=ph;
+      const dropT=clamp((T-tl.drop[0])/tl.drop[1]);
+      for(let m=0;m<3;m++){
+        const key=METRICS[m].key;
+        hlGuides(m,o,C.ink,dropT===0,o[key]);
+        if(dropT>0&&dropT<1){
+          const g=geomHist(m),[sx,sy]=hpos(m,o);
+          marker(lerp(sx,hx(m,o[key],m),easeOut(dropT)),lerp(sy,g.y0-14,easeIn(dropT)),C.ink,5);
+        }
+      }
+      ctx.globalAlpha=1;
+    }
+    // reference lines on histograms
+    const gp=clamp((T-tl.grow[0])/tl.grow[1]),mp=clamp((T-tl.med[0])/tl.med[1]);
+    for(let m=0;m<3;m++){
+      const key=METRICS[m].key,g=geomHist(m),xo=hx(m,o[key],m),xm=hx(m,M.med[key],m);
+      if(gp>0){
+        ctx.strokeStyle=C.ink;ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(xo,g.y0-14);ctx.lineTo(xo,lerp(g.y0-14,g.base,easeOut(gp)));ctx.stroke();
+      }
+      if(mp>0){
+        ctx.globalAlpha=mp;ctx.strokeStyle=C.ink2;ctx.lineWidth=2;ctx.setLineDash([5,4]);
+        ctx.beginPath();ctx.moveTo(xm,g.y0-14);ctx.lineTo(xm,g.base);ctx.stroke();ctx.setLineDash([]);
+        const fm=key==='dur'?1:0,tOde=`Mechanistic ${o[key].toFixed(fm)}`,tMed=`Median ${M.med[key].toFixed(fm)}`;
+        font(11.5,650);const wOde=ctx.measureText(tOde).width;font(11.5,600);const wMed=ctx.measureText(tMed).width,colR=g.x0+g.w+G.padR;
+        const odeLeft=xo<=xm,flip=odeLeft?xm+5+wMed>colR:xo+5+wOde>colR;
+        if(flip){
+          text(tOde,xo-5,g.y0-18,C.ink,11.5,650,'right');
+          text(tMed,xm-5,g.y0-34,C.ink2,11.5,600,'right');
+        }else{
+          text(tOde,odeLeft?xo-5:xo+5,g.y0-18,C.ink,11.5,650,odeLeft?'right':'left');
+          text(tMed,odeLeft?xm+5:xm-5,g.y0-18,C.ink2,11.5,600,odeLeft?'left':'right');
+        }
+        ctx.globalAlpha=1;
+      }
+    }
+  }
+  // status + table
+  const shown=afterStoch?M.n:Math.max(0,k+1);
+  $('status').textContent=T<tl.Ts?`Stochastic run ${shown} / ${M.n}`:(T<tl.med[0]?'Mechanistic model':'Medians vs mechanistic model');
+  $('res').classList.toggle('on',T>=tl.med[0]+0.3);
+}
+
+/* ---------- playback ---------- */
+let T=0,playing=true,last=null;
+function frame(ts){
+  if(playing){
+    if(last!==null)T+=(ts-last)/1000*parseFloat($('spd').value);
+    if(T>=M.tl.end){T=M.tl.end;playing=false;$('play').textContent='Play'}
+    $('scrub').value=Math.round(T*100);
+  }
+  last=ts;render(T);requestAnimationFrame(frame);
+}
+$('play').onclick=()=>{if(!playing&&T>=M.tl.end)T=0;playing=!playing;$('play').textContent=playing?'Pause':'Play'};
+$('replay').onclick=()=>{T=0;playing=true;$('play').textContent='Pause'};
+$('scrub').oninput=e=>{T=e.target.value/100;playing=false;$('play').textContent='Play'};
+$('nsel').onchange=()=>{build(+$('nsel').value);T=0;playing=true;$('play').textContent='Pause'};
+$('seed').onclick=()=>{seed=Math.floor(Math.random()*1e6);build(+$('nsel').value);T=0;playing=true;$('play').textContent='Pause'};
+function applyModel(){
+  const N=+$('pop').value;let i0=Math.round(+$('i0').value)||1;i0=Math.max(1,Math.min(i0,100,N-1));$('i0').value=i0;
+  P.N=N;P.I0=i0;P.beta=+$('r0').value*P.gamma;
+  build(+$('nsel').value);T=0;playing=true;$('play').textContent='Pause';
+}
+$('pop').onchange=applyModel;$('i0').onchange=applyModel;$('r0').onchange=applyModel;
+$('r0').oninput=e=>{$('r0v').textContent=(+e.target.value).toFixed(1)};
+addEventListener('keydown',e=>{if(e.code==='Space'&&!['SELECT','BUTTON','INPUT'].includes(e.target.tagName)){e.preventDefault();$('play').click()}});
+addEventListener('resize',()=>layout());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{readColors();ghostK=0;for(const g of gctx){g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,gcv[0].width,gcv[0].height)}});
+readColors();layout();build(200);
+requestAnimationFrame(frame);
+window.__setT=t=>{T=t;playing=false};   // for testing
+</script>
+</body>
+</html>
